@@ -1,70 +1,74 @@
 #include "Warp.hpp"
-#include <cmath>
-#include "opencv2/imgcodecs.hpp"
-#include "opencv2/highgui.hpp"
-#include "opencv2/imgproc.hpp"
+#include <iostream>
+#include <opencv2/core.hpp>
 
 const int CARD_WIDTH  = 610;
 const int CARD_HEIGHT = 860;
 
 using namespace cv;
 
-std::vector<cv::Point2f> orderPoints(const std::vector<cv::Point2f>& rotatedPoints, const std::vector<cv::Point2f>& cornerPoints)
+std::vector<cv::Point2f> orderPoints(const std::vector<cv::Point2f>& cornerPoints)
 {
-    std::vector<cv::Point2f> ordered(4);
-    
-    // find each corner by sum and difference
-    float minSum = FLT_MAX, maxSum = -FLT_MAX;
-    float minDiff = FLT_MAX, maxDiff = -FLT_MAX;
-    
-    for (int i = 0; i < 4; i++)
-    {
-        auto p = rotatedPoints[i];
-        float sum  = p.x + p.y;
-        float diff = p.x - p.y;
-    
-        if (sum  < minSum)  { minSum = sum; ordered[0] = cornerPoints[i]; } // top-left
-        if (sum  > maxSum)  { maxSum = sum; ordered[2] = cornerPoints[i]; } // bottom-right
-        if (diff < minDiff) { minDiff = diff; ordered[3] = cornerPoints[i]; } // bottom-left
-        if (diff > maxDiff) { maxDiff = diff; ordered[1] = cornerPoints[i]; } // top-right
-    }
+    // sort by y to get top two and bottom two
+    std::vector<cv::Point2f> sorted = cornerPoints;
 
-    return ordered;
+    std::sort(sorted.begin(), sorted.end(), [](const cv::Point2f& a, const cv::Point2f& b) { return a.y < b.y; });
+
+    std::vector<cv::Point2f> top = {sorted[0], sorted[1]};
+    std::vector<cv::Point2f> bottom = {sorted[2], sorted[3]};
+
+    // within each pair sort by x to get left/right
+    std::sort(top.begin(), top.end(), [](const cv::Point2f& a, const cv::Point2f& b) { return a.x < b.x; });
+    std::sort(bottom.begin(), bottom.end(), [](const cv::Point2f& a, const cv::Point2f& b) { return a.x < b.x; });
+
+    sorted[0] = top[0];    // TL
+    sorted[1] = top[1];     // TR
+    sorted[2] = bottom[1]; // BR
+    sorted[3] = bottom[0];  // BL
+    
+    return sorted;
 }
 
 std::vector<Mat> extractCards(Mat& img, std::vector<std::vector<cv::Point2f>> cardsPoint)
 {
     static const std::vector<cv::Point2f> destPoints = {{0, 0}, {(float)CARD_WIDTH, 0}, {(float)CARD_WIDTH, (float)CARD_HEIGHT}, {0, (float)CARD_HEIGHT}};
     std::vector<Mat> warped_cards;
-    
+
     for (const auto& approxPoints : cardsPoint)
     {
-        // We need to make sure that the cards enter the orderCards where they are portrait.
-        // All ordered does is make sure that order is correct for the perspective Transform.
-
-        auto rect = minAreaRect(approxPoints);
-        float angle = rect.angle;
-
-        if (rect.size.width > rect.size.height) { angle += 90.0f; }
-
-        // Create rotational Matrix we now have 1 to 1 map of rotated and current points, we use rotation in calculation but move the real points
-        std::vector<cv::Point2f> rotatedPoints;
-        transform(approxPoints, rotatedPoints, getRotationMatrix2D(rect.center, angle, 1.0));
-
-        auto orderedPoints = orderPoints(rotatedPoints, approxPoints);
-
-        // Draw lines to identify what we are scanning
-        for (int i = 0; i < 4; i++)
-        {
-            line(img, approxPoints[i], approxPoints[(i + 1) % 4], Scalar(0, 255, 0), 3);
-        }
+        auto orderedPoints = orderPoints(approxPoints);
 
         Mat warped;
         warpPerspective(img, warped, getPerspectiveTransform(orderedPoints, destPoints), cv::Size(CARD_WIDTH, CARD_HEIGHT));
-        
+
+        // If image is in wrong oreintation landscape instead portrait the symbol will be in right box, if so we flip.
+        int cornerSize = CARD_HEIGHT / 10;
+        Mat topLeft = warped(cv::Rect(0, 0, cornerSize, cornerSize));
+        Mat topRight = warped(cv::Rect(CARD_WIDTH - cornerSize, 0, cornerSize, cornerSize));
+
+        // draw debug boxes
+        cv::rectangle(warped, cv::Rect(0, 0, cornerSize, cornerSize), Scalar(0, 255, 0), 3);
+        cv::rectangle(warped, cv::Rect(CARD_WIDTH - cornerSize, 0, cornerSize, cornerSize), Scalar(0, 0, 255), 3);
+
+        // if TL is brighter than TR, ink is on the right side, rotate 90
+        if (cv::mean(topLeft)[0] > cv::mean(topRight)[0])
+        {
+            cv::rotate(warped, warped, cv::ROTATE_90_CLOCKWISE);
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            line(img, orderedPoints[i], orderedPoints[(i + 1) % 4], Scalar(0, 255, 0), 3);
+            circle(img, orderedPoints[i], 30, Scalar(0, 0, 255), 5);
+            putText(img, std::to_string(i), orderedPoints[i] + cv::Point2f(10, -10), FONT_HERSHEY_SIMPLEX, 3, Scalar(255, 255, 0), 10);
+
+            double dist = cv::norm(orderedPoints[i] - orderedPoints[(i + 1) % 4]);
+            cv::Point2f mid = (orderedPoints[i] + orderedPoints[(i + 1) % 4]) * 0.5f;
+            putText(img, std::to_string((int)dist), mid + cv::Point2f(5, -5), FONT_HERSHEY_SIMPLEX, 1, Scalar(255, 100, 0), 5);
+        }
+
         warped_cards.push_back(warped);
     }
-
     return warped_cards;
 }
 
@@ -74,7 +78,7 @@ std::vector<std::vector<cv::Point2f>> detectCardContours(Mat& img)
     // Loads an image and greyscale it.
     Mat src;
     cvtColor(img, src, COLOR_BGR2GRAY);
-    threshold(src, src, 196, 255, 0);
+    threshold(src, src, 196, 255, THRESH_BINARY);
 
     std::vector<std::vector<cv::Point>> contours;
     std::vector<cv::Vec4i> hierarchy;
