@@ -2,9 +2,6 @@
 #include <iostream>
 #include <opencv2/core.hpp>
 
-const int CARD_WIDTH  = 610;
-const int CARD_HEIGHT = 860;
-
 using namespace cv;
 
 std::vector<cv::Point2f> orderPoints(const std::vector<cv::Point2f>& cornerPoints)
@@ -42,19 +39,20 @@ std::vector<Mat> extractCards(Mat& img, std::vector<std::vector<cv::Point2f>> ca
         warpPerspective(img, warped, getPerspectiveTransform(orderedPoints, destPoints), cv::Size(CARD_WIDTH, CARD_HEIGHT));
 
         // If image is in wrong oreintation landscape instead portrait the symbol will be in right box, if so we flip.
-        int cornerSize = CARD_HEIGHT / 10;
-        Mat topLeft = warped(cv::Rect(0, 0, cornerSize, cornerSize));
-        Mat topRight = warped(cv::Rect(CARD_WIDTH - cornerSize, 0, cornerSize, cornerSize));
-
-        // draw debug boxes
-        cv::rectangle(warped, cv::Rect(0, 0, cornerSize, cornerSize), Scalar(0, 255, 0), 3);
-        cv::rectangle(warped, cv::Rect(CARD_WIDTH - cornerSize, 0, cornerSize, cornerSize), Scalar(0, 0, 255), 3);
+        
+        Mat topLeft = warped(cv::Rect(0, 0, cornerWidth, cornerHeight));
+        Mat topRight = warped(cv::Rect(CARD_WIDTH - cornerWidth, 0, cornerWidth, cornerHeight));
 
         // if TL is brighter than TR, ink is on the right side, rotate 90
         if (cv::mean(topLeft)[0] > cv::mean(topRight)[0])
         {
             cv::rotate(warped, warped, cv::ROTATE_90_CLOCKWISE);
+            cv::resize(warped, warped, cv::Size(CARD_WIDTH, CARD_HEIGHT));
         }
+        
+        // draw debug boxes
+        cv::rectangle(warped, cv::Rect(0, 0, cornerWidth, cornerHeight), Scalar(0, 255, 0), 3);
+        cv::rectangle(warped, cv::Rect(CARD_WIDTH - cornerWidth, 0, cornerWidth, cornerHeight), Scalar(0, 0, 255), 3);
 
         for (int i = 0; i < 4; i++)
         {
@@ -71,7 +69,6 @@ std::vector<Mat> extractCards(Mat& img, std::vector<std::vector<cv::Point2f>> ca
     }
     return warped_cards;
 }
-
 
 std::vector<std::vector<cv::Point2f>> detectCardContours(Mat& img)
 {
