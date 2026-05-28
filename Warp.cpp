@@ -52,7 +52,7 @@ std::pair<std::vector<Mat>,std::vector<Mat>> extractCards(Mat& img, std::vector<
             cv::resize(warped, warped, cv::Size(CARD_WIDTH, CARD_HEIGHT));
         }
             
-        Mat idCorner = warped(cv::Rect(0, 0, cornerWidth, cornerHeight)).clone();
+        Mat idCorner = warped(cv::Rect(0, 0, cornerWidth, CARD_HEIGHT / 3)).clone();
 
         warped_cards.first.push_back(warped);
         warped_cards.second.push_back(idCorner);

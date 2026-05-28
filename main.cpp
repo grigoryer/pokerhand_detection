@@ -94,7 +94,7 @@ void testLocal()
 
         std::cout << elapsed.count() << "\n";
 
-        imshow("card scanner", img);
+        //imshow("card scanner", img);
         waitKey(0);
         destroyAllWindows();
     }

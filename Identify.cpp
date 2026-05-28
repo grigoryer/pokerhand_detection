@@ -39,6 +39,33 @@ Mat tangentHistogram(const vector<Point>& contour)
     return hist;
 }
 
+struct SuitFeatures
+{
+    double centroidRatio; // 0 = top, 1 = bottom relative to bounding box
+    double topMass;
+    double bottomMass;
+};
+
+SuitFeatures extractFeatures(const std::vector<cv::Point>& contour)
+{
+    Moments m = moments(contour);
+    double cy = m.m01 / m.m00;
+    Rect bb = boundingRect(contour);
+    double centroidRatio = (cy - bb.y) / bb.height;
+
+    double midY = bb.y + bb.height / 2.0;
+    int top = 0, bottom = 0;
+    
+    for (const auto& pt : contour)
+    {
+        if (pt.y < midY) { top++; }
+        else { bottom++; }
+    }
+
+    double total = contour.size();
+    return { centroidRatio, top / total, bottom / total };
+}
+
 void initTemplates()
 {
     suitHistograms.resize(4);
@@ -121,73 +148,39 @@ COLOR identifyColor(Mat& imgCorner)
 
 SUIT identifySuit(Mat& imgCorner, COLOR suitColor)
 {   
-    int curSuit;
-
-    if (suitColor == COLOR::BLACK)
-    {
-        curSuit = 2;
-    }
-    else 
-    {
-        curSuit = 0;
-    }
-    
     std::vector<std::vector<cv::Point>> contours;
     Mat edges, grey;
-
     cvtColor(imgCorner, grey, COLOR_BGR2BGRA);
     Canny(grey, edges, 30, 200);
-
     Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
     dilate(edges, edges, kernel, Point(-1, -1), 1);
     findContours(edges, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
 
-    int endSuit = curSuit + 2;
-    int bestSuit = curSuit;
+    if (contours.empty())
+    {
+        std::cout << "No contours found, defaulting\n";
+        return suitColor == COLOR::RED ? SUIT::HEART : SUIT::CLUB;
+    }
 
-    double secondBestDif = 0;
-    double bestScore = -1e9; 
-    double score;
-
-    for (; curSuit < endSuit; curSuit++)
-    {    
-        score = -1e9;
-
-        std::sort(contours.begin(), contours.end(), [](const auto& a, const auto& b)
+    std::sort(contours.begin(), contours.end(), [](const auto& a, const auto& b)
             { return contourArea(a) > contourArea(b); });
 
-        for (int i = 0; i < std::min((int)contours.size(), 3); i++)
-        {
-            Mat curimage = imgCorner.clone();
-            Mat curHist = tangentHistogram(contours[i]);
-            double cntScore = compareHist(curHist, suitHistograms[curSuit], HISTCMP_CORREL);
-            score = std::max(score, cntScore);
-            
-            drawContours(curimage, contours, i, Scalar(0,255,0), 5);
-            
-            // std::cout << numToSuit(curSuit) << " Score: " << cntScore << "\n";
-            // imshow("contour", curimage);
-            // imshow("edge", edges);
-            // moveWindow("edge", 200,0);
-            // waitKey();
-            // destroyWindow("edge");
-            // destroyWindow("contour");
-        }
 
-        std::cout << numToSuit(curSuit) << " Best Score: " << score << "\n";
-        if (score > bestScore)
-        {
-            secondBestDif = bestScore - score;
-            bestSuit = curSuit;
-            bestScore = score;
-        }
-        else 
-        {
-            secondBestDif = score - bestScore;
-        }
+
+    //return early for red just use geometric difference.
+    if (suitColor == COLOR::RED)
+    {
+        SuitFeatures f = extractFeatures(contours[0]);
+        return (f.centroidRatio < 0.4 ? SUIT::HEART : SUIT::DIAMOND);
     }
-    
-    return static_cast<SUIT>(bestSuit);
+
+    Mat curHist = tangentHistogram(contours[0]);
+    double clubScore  = compareHist(curHist, suitHistograms[2], HISTCMP_CORREL);
+    double spadeScore = compareHist(curHist, suitHistograms[3], HISTCMP_CORREL);
+
+    std::cout << "Club: " << clubScore << " Spade: " << spadeScore << "\n";
+    return clubScore > spadeScore ? SUIT::CLUB : SUIT::SPADE;
+
 }
 
 
