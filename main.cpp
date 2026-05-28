@@ -1,5 +1,4 @@
 #include <iostream>
-#include <ratio>
 #include <string>
 #include <chrono>
 
@@ -19,32 +18,39 @@ using namespace std;
 
 void testCam()
 {
-    cv::VideoCapture cap(0);
+    cv::VideoCapture cap(0, cv::CAP_AVFOUNDATION);
     if (!cap.isOpened())
     {
         std::cerr << "Could not open camera\n";
         return;
     }
 
+    // drain warm-up frames
     Mat frame;
-    
+    for (int i = 0; i < 30; i++) cap >> frame;
     int frameCount = 0;
     while (true)
     {
         cap >> frame;
+        if (frame.empty()) continue;
+
+        //std::cout << "frame: " << frame.cols << "x" << frame.rows 
+                //<< " type=" << frame.type() << "\n";
+                
         frameCount++;
-        if (frame.empty()) break;
+        if (frame.empty()) continue;
 
         auto cords = detectCardContours(frame);
         auto cards = extractCards(frame, cords);
         
         imshow("card scanner", frame);
         
-        if (!cards.empty())
+        if (!cards.first.empty())
         {
-            auto suit = identitySuit(cards[0]);
+            identifyCard(cards.second[0], cards.first[0]);
             string name = "warped";
-            imshow(name, cards[0]);
+            imshow(name, cards.first[0]);
+            imshow("warpedCorner", cards.second[0]);
         }
 
         if (waitKey(1) == 'q') break;
@@ -56,8 +62,9 @@ void testCam()
 
 void testLocal()
 {
-    for (int i = 0; i < 1; i++)
+    for (int i = 0; i < 6; i++)
     {
+        std::cout << "\nNEW IMAGE " << i << "\n";
         string file = "build/images/card" + to_string(i) + ".jpeg";
         Mat img = imread(file);
 
@@ -73,12 +80,12 @@ void testLocal()
 
         size_t count = 0;
 
-        for (auto& card : cards)
+        for (size_t i = 0; i < cards.first.size(); i++)
         {
-            auto suit = identitySuit(card);
-            String name = "warped" + to_string(count++);
-            imshow(name, card);
-            moveWindow(name, (150 * count++), 0);
+            identifyCard(cards.second[i], cards.first[i]);
+            String name = "warped" + to_string(i);
+            imshow(name, cards.first[i]);
+            moveWindow(name, (150 * ((int)i + 1)), 0);
         }
 
 
@@ -97,7 +104,7 @@ void testLocal()
 int main()
 {
     initTemplates();
-    testLocal();
+    testCam();
 
     return 0;
 }

@@ -1,6 +1,7 @@
 #include "Warp.hpp"
 #include <iostream>
 #include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 
 using namespace cv;
 
@@ -26,10 +27,12 @@ std::vector<cv::Point2f> orderPoints(const std::vector<cv::Point2f>& cornerPoint
     return sorted;
 }
 
-std::vector<Mat> extractCards(Mat& img, std::vector<std::vector<cv::Point2f>> cardsPoint)
+
+// first is going to be the entire card, second is the corner extracted.
+std::pair<std::vector<Mat>,std::vector<Mat>> extractCards(Mat& img, std::vector<std::vector<cv::Point2f>> cardsPoint)
 {
     static const std::vector<cv::Point2f> destPoints = {{0, 0}, {(float)CARD_WIDTH, 0}, {(float)CARD_WIDTH, (float)CARD_HEIGHT}, {0, (float)CARD_HEIGHT}};
-    std::vector<Mat> warped_cards;
+    std::pair<std::vector<Mat>,std::vector<Mat>>  warped_cards;
 
     for (const auto& approxPoints : cardsPoint)
     {
@@ -39,17 +42,21 @@ std::vector<Mat> extractCards(Mat& img, std::vector<std::vector<cv::Point2f>> ca
         warpPerspective(img, warped, getPerspectiveTransform(orderedPoints, destPoints), cv::Size(CARD_WIDTH, CARD_HEIGHT));
 
         // If image is in wrong oreintation landscape instead portrait the symbol will be in right box, if so we flip.
-        
         Mat topLeft = warped(cv::Rect(0, 0, cornerWidth, cornerHeight));
         Mat topRight = warped(cv::Rect(CARD_WIDTH - cornerWidth, 0, cornerWidth, cornerHeight));
-
+        
         // if TL is brighter than TR, ink is on the right side, rotate 90
         if (cv::mean(topLeft)[0] > cv::mean(topRight)[0])
         {
             cv::rotate(warped, warped, cv::ROTATE_90_CLOCKWISE);
             cv::resize(warped, warped, cv::Size(CARD_WIDTH, CARD_HEIGHT));
         }
-        
+            
+        Mat idCorner = warped(cv::Rect(0, 0, cornerWidth, cornerHeight)).clone();
+
+        warped_cards.first.push_back(warped);
+        warped_cards.second.push_back(idCorner);
+
         // draw debug boxes
         cv::rectangle(warped, cv::Rect(0, 0, cornerWidth, cornerHeight), Scalar(0, 255, 0), 3);
         cv::rectangle(warped, cv::Rect(CARD_WIDTH - cornerWidth, 0, cornerWidth, cornerHeight), Scalar(0, 0, 255), 3);
@@ -64,8 +71,6 @@ std::vector<Mat> extractCards(Mat& img, std::vector<std::vector<cv::Point2f>> ca
             cv::Point2f mid = (orderedPoints[i] + orderedPoints[(i + 1) % 4]) * 0.5f;
             putText(img, std::to_string((int)dist), mid + cv::Point2f(5, -5), FONT_HERSHEY_SIMPLEX, 1, Scalar(255, 100, 0), 5);
         }
-
-        warped_cards.push_back(warped);
     }
     return warped_cards;
 }

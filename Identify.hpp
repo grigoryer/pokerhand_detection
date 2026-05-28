@@ -10,10 +10,10 @@
 using namespace cv;
 using namespace std;
 
-enum class SUIT { CLUB, DIAMOND, HEART, SPADE };
-
-static std::vector<Mat> suitTemplates;
+enum class SUIT { HEART, DIAMOND, CLUB, SPADE };
+enum class COLOR { BLACK, RED };
 
 void initTemplates();
 
-SUIT identitySuit(Mat& imgCard);
+SUIT identifySuit(Mat& imgCorner, COLOR suitColor);
+void identifyCard(Mat& imgCorner, Mat& imgCard);
