@@ -65,7 +65,7 @@ void testCam()
 
 void testLocal()
 {
-    for (int i = 0; i < 1; i++)
+    for (int i = 0; i < 8; i++)
     {
         std::cout << "\nNEW IMAGE " << i << "\n";
         string file = "build/images/card" + to_string(i) + ".jpeg";
@@ -97,7 +97,7 @@ void testLocal()
 
         std::cout << elapsed.count() << "\n";
 
-        imshow("card scanner", img);
+        //imshow("card scanner", img);
         waitKey(0);
         destroyAllWindows();
     }
@@ -107,7 +107,7 @@ void testLocal()
 int main()
 {
     initTemplates();
-    testCam();
+    testLocal();
 
     return 0;
 }

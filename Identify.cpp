@@ -16,7 +16,12 @@ using namespace std;
 
 
 static std::vector<Mat> suitHistograms;
-static std::vector<Mat> suitTemplate;
+
+static auto orb = cv::ORB::create(80);
+
+static std::vector<cv::Mat> rankDescriptors;
+static std::vector<std::vector<cv::KeyPoint>> rankKeypoints;
+
 
 Mat tangentHistogram(const vector<Point>& contour)
 {
@@ -66,6 +71,7 @@ std::vector<std::vector<cv::Point>> findSortedContours(Mat& img, const int canny
 
 void initTemplates()
 {
+    // Histograms for suit
     suitHistograms.resize(4);
     for (int i{}; i < 4; i++)
     {
@@ -82,6 +88,18 @@ void initTemplates()
         auto contours = findSortedContours(suitTemplate, 10, 80);
         suitHistograms[i] = tangentHistogram(contours[0]);
     }
+
+    // Orb for rank
+    rankDescriptors.resize(13);
+    rankKeypoints.resize(13);
+
+    for (int i = 0; i < 13; i++)
+    {
+        Mat templ = imread("cards/rank/" + to_string(i) + ".png", IMREAD_GRAYSCALE);
+        threshold(templ, templ, 0, 255, THRESH_BINARY | THRESH_OTSU);
+        cv::resize(templ, templ, Size(250, 300));
+        orb->detectAndCompute(templ, cv::noArray(), rankKeypoints[i], rankDescriptors[i]);
+    }
 }
 
 String numToSuit(int suit)
@@ -94,6 +112,27 @@ String numToSuit(int suit)
         case (3) : return "Spade";
     }
 
+    return "error";
+}
+
+String numToRank(int rank)
+{
+    switch (rank)
+    {
+        case (0) : return "Ace";
+        case (1) : return "Two";
+        case (2) : return "Three";
+        case (3) : return "Four";
+        case (4) : return "Five";
+        case (5) : return "Six";
+        case (6) : return "Seven";
+        case (7) : return "Eight";
+        case (8) : return "Nine";
+        case (9) : return "Ten";
+        case (10) : return "Jack";
+        case (11) : return "Queen";
+        case (12) : return "King";
+    }
     return "error";
 }
 
@@ -137,7 +176,6 @@ COLOR identifyColor(Mat& imgCorner)
 
     return COLOR::BLACK;
 }
-
 
 SUIT identifySuit(Mat& imgCorner, COLOR suitColor)
 {   
@@ -201,6 +239,59 @@ SUIT identifySuit(Mat& imgCorner, COLOR suitColor)
     return static_cast<SUIT>(bestSuit);
 }
 
+RANK identifyRank(Mat& imgCorner)
+{
+    Mat grey;
+    cvtColor(imgCorner, grey, COLOR_BGR2GRAY);
+    threshold(grey, grey, 0, 255, THRESH_BINARY | THRESH_OTSU);
+    cv::resize(grey, grey, Size(250, 300));
+
+    std::vector<cv::KeyPoint> rankKP;
+    cv::Mat rankDesc;
+    orb->detectAndCompute(grey, cv::noArray(), rankKP, rankDesc);
+
+    if (rankDesc.empty()) return RANK::ACE;
+
+    cv::BFMatcher matcher(cv::NORM_HAMMING);
+    int bestRank = 0;
+    double bestScore = -1;
+
+    for (int i = 0; i < 13; i++)
+    {
+        
+        std::vector<std::vector<cv::DMatch>> knnMatches;
+        matcher.knnMatch(rankDesc, rankDescriptors[i], knnMatches, 2);
+
+        std::vector<cv::DMatch> goodMatches;
+        for (const auto& m : knnMatches)
+        {
+            if (m.size() >= 2 && m[0].distance < .80f * m[1].distance)
+                goodMatches.push_back(m[0]);
+        }
+
+        double score = goodMatches.size();
+
+        std::cout << numToRank(i) << " good matches: " << score << "\n";
+
+        Mat templ = imread("cards/rank/" + to_string(i) + ".png", IMREAD_GRAYSCALE);
+        threshold(templ, templ, 0, 255, THRESH_BINARY | THRESH_OTSU);
+        cv::resize(templ, templ, Size(250, 300));
+        cv::Mat result;
+        cv::drawMatches(grey, rankKP, templ, rankKeypoints[i], goodMatches, result);
+        cv::imshow("matches", result);
+        waitKey(0);
+        destroyWindow("matches");
+
+        if (score > bestScore)
+        {
+            bestScore = score;
+            bestRank = i;
+        }
+    }
+
+    return static_cast<RANK>(bestRank);
+}
+
 
 CARD identifyCard(Mat& imgCorner, Mat& imgCard)
 {  
@@ -210,13 +301,16 @@ CARD identifyCard(Mat& imgCorner, Mat& imgCard)
     // Find color
     COLOR suitColor = identifyColor(imgCorner);
 
-    //Find rank
-    cardType.first = RANK::ACE;
-    
-    // find suit
+    //Find rank and suit
+    Mat rankCorner = imgCorner(cv::Rect(0, 0, cornerWidth, 130)).clone();
+    imshow("rank", rankCorner);
+    waitKey(0);
+    destroyWindow("rank");
+
+    cardType.first = identifyRank(rankCorner);
     cardType.second = identifySuit(imgCorner, suitColor);
     
-    putText(imgCard, numToSuit((int)cardType.second), cv::Point2f(100, imgCard.size().height - 60), FONT_HERSHEY_SIMPLEX, 3, Scalar(255, 0, 0), 10);
+    putText(imgCard, (numToRank((int)cardType.first)) + " of " + (numToSuit((int)cardType.second)), cv::Point2f(100, imgCard.size().height - 60), FONT_HERSHEY_SIMPLEX, 2, Scalar(255, 0, 0), 10);
 
     return cardType;
 }
