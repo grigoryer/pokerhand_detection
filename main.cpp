@@ -19,6 +19,9 @@ using namespace std;
 void testCam()
 {
     cv::VideoCapture cap(0, cv::CAP_AVFOUNDATION);
+
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, 1920);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 1080);
     if (!cap.isOpened())
     {
         std::cerr << "Could not open camera\n";
@@ -47,7 +50,7 @@ void testCam()
         
         if (!cards.first.empty())
         {
-            identifyCard(cards.second[0], cards.first[0]);
+            auto card = identifyCard(cards.second[0], cards.first[0]);
             string name = "warped";
             imshow(name, cards.first[0]);
             imshow("warpedCorner", cards.second[0]);
@@ -62,7 +65,7 @@ void testCam()
 
 void testLocal()
 {
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 1; i++)
     {
         std::cout << "\nNEW IMAGE " << i << "\n";
         string file = "build/images/card" + to_string(i) + ".jpeg";
@@ -94,7 +97,7 @@ void testLocal()
 
         std::cout << elapsed.count() << "\n";
 
-        //imshow("card scanner", img);
+        imshow("card scanner", img);
         waitKey(0);
         destroyAllWindows();
     }

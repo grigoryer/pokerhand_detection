@@ -14,56 +14,54 @@
 using namespace cv;
 using namespace std;
 
-static std::vector<Mat> suitHistograms;
-// FIRST IMPLEMENTATION USING TEMPLATES
 
+static std::vector<Mat> suitHistograms;
+static std::vector<Mat> suitTemplate;
 
 Mat tangentHistogram(const vector<Point>& contour)
 {
-    int bins = 32;
+    int bins = 180;
 
     Mat hist = Mat::zeros(1, bins, CV_32F);
     int n = contour.size();
     
+    // for each line find the tangent line to the edge, add it to bin.
     for (int i = 0; i < n; i++)
     {
         Point prev = contour[(i - 1 + n) % n];
         Point next = contour[(i + 1) % n];
-        float angle = atan2f(next.y - prev.y, next.x - prev.x); // -pi to pi
-        angle += CV_PI; // shift to 0–2pi
+        float angle = atan2f(next.y - prev.y, next.x - prev.x);
+        angle += CV_PI;
         int bin = (int)(angle / (2 * CV_PI) * bins) % bins;
         hist.at<float>(0, bin)++;
     }
-    
+
     normalize(hist, hist, 1, 0, NORM_L1);
     return hist;
 }
 
-struct SuitFeatures
+std::vector<std::vector<cv::Point>> findSortedContours(Mat& img, const int cannyLow, const int cannyHigh)
 {
-    double centroidRatio; // 0 = top, 1 = bottom relative to bounding box
-    double topMass;
-    double bottomMass;
-};
+    Mat grey, edges;
 
-SuitFeatures extractFeatures(const std::vector<cv::Point>& contour)
-{
-    Moments m = moments(contour);
-    double cy = m.m01 / m.m00;
-    Rect bb = boundingRect(contour);
-    double centroidRatio = (cy - bb.y) / bb.height;
-
-    double midY = bb.y + bb.height / 2.0;
-    int top = 0, bottom = 0;
+    //Convert to gray and preprocess threshold.
+    cvtColor(img, grey, COLOR_BGR2GRAY);
+    threshold(grey, grey, 0, 255, THRESH_BINARY | THRESH_OTSU);
     
-    for (const auto& pt : contour)
-    {
-        if (pt.y < midY) { top++; }
-        else { bottom++; }
-    }
+    // Find edges and increase edge thickness.
+    Canny(grey, edges, cannyLow, cannyHigh);
+    Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
+    dilate(edges, edges, kernel, Point(-1, -1), 1);
 
-    double total = contour.size();
-    return { centroidRatio, top / total, bottom / total };
+    // Find contours, use "CHAIN_APPROX_NONE" for more exact cords. 
+    // Sort based on area and only use the biggest contour, prevents using a random dot instead.
+    std::vector<std::vector<cv::Point>> contours;
+    findContours(edges, contours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+
+    std::sort(contours.begin(), contours.end(), [](const auto& a, const auto& b)
+        { return contourArea(a) > contourArea(b); });
+
+    return contours;
 }
 
 void initTemplates()
@@ -71,39 +69,21 @@ void initTemplates()
     suitHistograms.resize(4);
     for (int i{}; i < 4; i++)
     {
-        Mat suitTemplate = imread("cards/suit/" + to_string(i) + ".png", IMREAD_GRAYSCALE);
-        Mat suitTemplateFull = imread("cards/suit/" + to_string(i) + ".png");
+        Mat suitTemplate = imread("cards/suit/" + to_string(i) + ".png");
 
-        cv::resize(suitTemplate, suitTemplate, Size(76, 86));
-        GaussianBlur(suitTemplate, suitTemplate, Size(3,3), 0);
-        
+        // Inrease make the tangent lines more visisble
+        cv::resize(suitTemplate, suitTemplate, Size(250,300));
 
-        std::vector<std::vector<cv::Point>> contours;
-        Mat edges;
-        Canny(suitTemplate, edges, 30, 200);
+        // Preprocesses template Image for histogram
+        cv::GaussianBlur(suitTemplate, suitTemplate, Size(3,1), 0);
+        cv::GaussianBlur(suitTemplate, suitTemplate, Size(1,3), 0);
 
-        Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
-        dilate(edges, edges, kernel, Point(-1, -1), 1);
-        
-        findContours(edges, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
-
-        std::sort(contours.begin(), contours.end(), [](const auto& a, const auto& b)
-            { return contourArea(a) > contourArea(b); });
-            
-        for (int j{}; j < contours.size(); j++)
-        {
-            drawContours(suitTemplateFull, contours, j, Scalar(255,0,0), 5);
-        }
-        
-        // imshow("cnt", suitTemplateFull);
-        // waitKey(0);
-        // destroyWindow("cnt");
+        // Find edges and increase edge thickness.
+        auto contours = findSortedContours(suitTemplate, 10, 80);
         suitHistograms[i] = tangentHistogram(contours[0]);
     }
 }
 
-// First attempt, incredibly slow since we are checking entire image, 
-// will improve later to only check conrners and compare that crop.
 String numToSuit(int suit)
 {
     switch (suit)
@@ -142,56 +122,101 @@ COLOR identifyColor(Mat& imgCorner)
 
     std::cout << "\nRED COUNT: " << redCount << "\nBLACK COUNT: " << blackCount << "\n";
 
-    return COLOR(redCount > blackCount);
+    // Ratio of 15% or more needed to dominate, else it is unknown color.
+    int total = redCount + blackCount;
+    if (total == 0 || (double)std::abs(redCount - blackCount) / total < 0.15)
+    {
+        return COLOR::UNKNOWN;
+    }
+
+    // Return which count is larger
+    if (redCount > blackCount) 
+    {   
+        return COLOR::RED;
+    }
+
+    return COLOR::BLACK;
 }
 
 
 SUIT identifySuit(Mat& imgCorner, COLOR suitColor)
 {   
-    std::vector<std::vector<cv::Point>> contours;
-    Mat edges, grey;
-    cvtColor(imgCorner, grey, COLOR_BGR2BGRA);
-    Canny(grey, edges, 30, 200);
-    Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
-    dilate(edges, edges, kernel, Point(-1, -1), 1);
-    findContours(edges, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
-
+    // Find contours
+    auto contours = findSortedContours(imgCorner, 10, 80);
+    
     if (contours.empty())
     {
         std::cout << "No contours found, defaulting\n";
         return suitColor == COLOR::RED ? SUIT::HEART : SUIT::CLUB;
     }
 
-    std::sort(contours.begin(), contours.end(), [](const auto& a, const auto& b)
-            { return contourArea(a) > contourArea(b); });
-
-
-
-    //return early for red just use geometric difference.
-    if (suitColor == COLOR::RED)
+    // Based on color check only needed colors. 
+    int curSuit;
+    int endSuit = 0;
+    if (suitColor == COLOR::BLACK)
     {
-        SuitFeatures f = extractFeatures(contours[0]);
-        return (f.centroidRatio < 0.4 ? SUIT::HEART : SUIT::DIAMOND);
+        curSuit = static_cast<int>(SUIT::CLUB);
+        endSuit = static_cast<int>(SUIT::SPADE);
     }
+    else if (suitColor == COLOR::RED)
+    {
+        curSuit = static_cast<int>(SUIT::HEART);
+        endSuit = static_cast<int>(SUIT::DIAMOND);
+    }
+    else 
+    {
+        curSuit = static_cast<int>(SUIT::HEART);
+        endSuit = static_cast<int>(SUIT::SPADE);
+    }
+    
+    // For the top 3 contours check relative scores, and keep the largest score as the best suit
+    int bestSuit = curSuit;
+    double bestScore = -1e9; 
+    double score = bestScore;
+    
+    for (; curSuit <= endSuit; curSuit++)
+    {
+        score = -1e9;
+        // double check for multiple contours. Go through top 3 based on area.
+        for (int i = 0; i < std::min((int)contours.size(), 3); i++)
+        {
+            Mat curHist = tangentHistogram(contours[i]);
+            double cntScore = compareHist(curHist, suitHistograms[curSuit], HISTCMP_CORREL);
+            score = std::max(score, cntScore);
+            
+            // Debug draw contours and each of there scores.
+            drawContours(imgCorner, contours, i, Scalar(0,255,0), 5);
+            std::cout << numToSuit(curSuit) << " Score: " << cntScore << "\n";
+        }
 
-    Mat curHist = tangentHistogram(contours[0]);
-    double clubScore  = compareHist(curHist, suitHistograms[2], HISTCMP_CORREL);
-    double spadeScore = compareHist(curHist, suitHistograms[3], HISTCMP_CORREL);
-
-    std::cout << "Club: " << clubScore << " Spade: " << spadeScore << "\n";
-    return clubScore > spadeScore ? SUIT::CLUB : SUIT::SPADE;
-
+        std::cout << "Best Suit Score" << numToSuit(curSuit) << " " << score << "\n";
+        
+        if (score > bestScore)
+        {
+            bestSuit = curSuit;
+            bestScore = score;
+        }
+    }   
+    
+    return static_cast<SUIT>(bestSuit);
 }
 
 
-void identifyCard(Mat& imgCorner, Mat& imgCard)
+CARD identifyCard(Mat& imgCorner, Mat& imgCard)
 {  
-    Mat suitCorner = imgCorner(cv::Rect(0, 120, cornerWidth, (cornerHeight / 2))).clone();
-    cv::GaussianBlur(suitCorner, suitCorner, Size(3,1), 10);
-    cv::GaussianBlur(suitCorner, suitCorner, Size(1,3), 10);
+    // Find card, 
+    CARD cardType;
 
-    COLOR suitColor = identifyColor(suitCorner);
-    SUIT suit = identifySuit(suitCorner, suitColor);
+    // Find color
+    COLOR suitColor = identifyColor(imgCorner);
 
-    putText(imgCard, numToSuit((int)suit), cv::Point2f(100, imgCard.size().height - 60), FONT_HERSHEY_SIMPLEX, 3, Scalar(255, 0, 0), 10);
+    //Find rank
+    cardType.first = RANK::ACE;
+    
+    // find suit
+    cardType.second = identifySuit(imgCorner, suitColor);
+    
+    putText(imgCard, numToSuit((int)cardType.second), cv::Point2f(100, imgCard.size().height - 60), FONT_HERSHEY_SIMPLEX, 3, Scalar(255, 0, 0), 10);
+
+    return cardType;
 }

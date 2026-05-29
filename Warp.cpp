@@ -80,6 +80,8 @@ std::vector<std::vector<cv::Point2f>> detectCardContours(Mat& img)
     // Loads an image and greyscale it.
     Mat src;
     cvtColor(img, src, COLOR_BGR2GRAY);
+    cv::GaussianBlur(img, img, Size(3,1), 0);
+    cv::GaussianBlur(img, img, Size(1,3), 0);
     threshold(src, src, 196, 255, THRESH_BINARY);
 
     std::vector<std::vector<cv::Point>> contours;

@@ -11,9 +11,13 @@ using namespace cv;
 using namespace std;
 
 enum class SUIT { HEART, DIAMOND, CLUB, SPADE };
-enum class COLOR { BLACK, RED };
+enum class RANK { ACE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE, TEN, JACK, QUEEN, KING };
+enum class COLOR { BLACK, RED, UNKNOWN };
+
+using CARD = std::pair<RANK, SUIT>; 
 
 void initTemplates();
 
 SUIT identifySuit(Mat& imgCorner, COLOR suitColor);
-void identifyCard(Mat& imgCorner, Mat& imgCard);
+String numToSuit(int suit);
+CARD identifyCard(Mat& imgCorner, Mat& imgCard);
