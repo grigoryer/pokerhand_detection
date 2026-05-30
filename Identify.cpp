@@ -1,6 +1,5 @@
 #include "Warp.hpp"
 #include "Identify.hpp"
-#include <functional>
 #include <iostream>
 #include <opencv2/core/cvstd.hpp>
 #include <opencv2/core/types.hpp>
@@ -17,90 +16,11 @@ using namespace std;
 
 static std::vector<Mat> suitHistograms;
 
-static auto orb = cv::ORB::create(80);
+static std::vector<Mat> rankTempl;
 
-static std::vector<cv::Mat> rankDescriptors;
-static std::vector<std::vector<cv::KeyPoint>> rankKeypoints;
+const int RANK_WIDTH = 100;
+const int RANK_HEIGHT = 150;
 
-
-Mat tangentHistogram(const vector<Point>& contour)
-{
-    int bins = 180;
-
-    Mat hist = Mat::zeros(1, bins, CV_32F);
-    int n = contour.size();
-    
-    // for each line find the tangent line to the edge, add it to bin.
-    for (int i = 0; i < n; i++)
-    {
-        Point prev = contour[(i - 1 + n) % n];
-        Point next = contour[(i + 1) % n];
-        float angle = atan2f(next.y - prev.y, next.x - prev.x);
-        angle += CV_PI;
-        int bin = (int)(angle / (2 * CV_PI) * bins) % bins;
-        hist.at<float>(0, bin)++;
-    }
-
-    normalize(hist, hist, 1, 0, NORM_L1);
-    return hist;
-}
-
-std::vector<std::vector<cv::Point>> findSortedContours(Mat& img, const int cannyLow, const int cannyHigh)
-{
-    Mat grey, edges;
-
-    //Convert to gray and preprocess threshold.
-    cvtColor(img, grey, COLOR_BGR2GRAY);
-    threshold(grey, grey, 0, 255, THRESH_BINARY | THRESH_OTSU);
-    
-    // Find edges and increase edge thickness.
-    Canny(grey, edges, cannyLow, cannyHigh);
-    Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
-    dilate(edges, edges, kernel, Point(-1, -1), 1);
-
-    // Find contours, use "CHAIN_APPROX_NONE" for more exact cords. 
-    // Sort based on area and only use the biggest contour, prevents using a random dot instead.
-    std::vector<std::vector<cv::Point>> contours;
-    findContours(edges, contours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
-
-    std::sort(contours.begin(), contours.end(), [](const auto& a, const auto& b)
-        { return contourArea(a) > contourArea(b); });
-
-    return contours;
-}
-
-void initTemplates()
-{
-    // Histograms for suit
-    suitHistograms.resize(4);
-    for (int i{}; i < 4; i++)
-    {
-        Mat suitTemplate = imread("cards/suit/" + to_string(i) + ".png");
-
-        // Inrease make the tangent lines more visisble
-        cv::resize(suitTemplate, suitTemplate, Size(250,300));
-
-        // Preprocesses template Image for histogram
-        cv::GaussianBlur(suitTemplate, suitTemplate, Size(3,1), 0);
-        cv::GaussianBlur(suitTemplate, suitTemplate, Size(1,3), 0);
-
-        // Find edges and increase edge thickness.
-        auto contours = findSortedContours(suitTemplate, 10, 80);
-        suitHistograms[i] = tangentHistogram(contours[0]);
-    }
-
-    // Orb for rank
-    rankDescriptors.resize(13);
-    rankKeypoints.resize(13);
-
-    for (int i = 0; i < 13; i++)
-    {
-        Mat templ = imread("cards/rank/" + to_string(i) + ".png", IMREAD_GRAYSCALE);
-        threshold(templ, templ, 0, 255, THRESH_BINARY | THRESH_OTSU);
-        cv::resize(templ, templ, Size(250, 300));
-        orb->detectAndCompute(templ, cv::noArray(), rankKeypoints[i], rankDescriptors[i]);
-    }
-}
 
 String numToSuit(int suit)
 {
@@ -134,6 +54,97 @@ String numToRank(int rank)
         case (12) : return "King";
     }
     return "error";
+}
+
+Mat tangentHistogram(const vector<Point>& contour)
+{
+    int bins = 180;
+
+    Mat hist = Mat::zeros(1, bins, CV_32F);
+    int n = contour.size();
+    
+    // for each line find the tangent line to the edge, add it to bin.
+    for (int i = 0; i < n; i++)
+    {
+        Point prev = contour[(i - 1 + n) % n];
+        Point next = contour[(i + 1) % n];
+        float angle = atan2f(next.y - prev.y, next.x - prev.x);
+        angle += CV_PI;
+        int bin = (int)(angle / (2 * CV_PI) * bins) % bins;
+        hist.at<float>(0, bin)++;
+    }
+
+    normalize(hist, hist, 1, 0, NORM_L1);
+    return hist;
+}
+
+
+std::vector<std::vector<cv::Point>> findSortedContours(Mat& img, const int cannyLow, const int cannyHigh)
+{
+    Mat grey, edges;
+
+    //Convert to gray and preprocess threshold.
+    cvtColor(img, grey, COLOR_BGR2GRAY);
+    threshold(grey, grey, 0, 255, THRESH_BINARY | THRESH_OTSU);
+    
+    // Find edges and increase edge thickness.
+    Canny(grey, edges, cannyLow, cannyHigh);
+    Mat kernel = getStructuringElement(MORPH_RECT, Size(3, 3));
+    dilate(edges, edges, kernel, Point(-1, -1), 1);
+
+    // Find contours, use "CHAIN_APPROX_NONE" for more exact cords. 
+    // Sort based on area and only use the biggest contour, prevents using a random dot instead.
+    std::vector<std::vector<cv::Point>> contours;
+    findContours(edges, contours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+
+    std::sort(contours.begin(), contours.end(), [](const auto& a, const auto& b)
+        { return contourArea(a) > contourArea(b); });
+
+    return contours;
+}
+
+
+void initTemplates()
+{
+    // Histograms for suit
+    suitHistograms.resize(4);
+    for (int i{}; i < 4; i++)
+    {
+        Mat suitTemplate = imread("cards/suit/" + to_string(i) + ".png");
+
+        // Inrease make the tangent lines more visisble
+        cv::resize(suitTemplate, suitTemplate, Size(250,300));
+
+        // Preprocesses template Image for histogram
+        cv::GaussianBlur(suitTemplate, suitTemplate, Size(3,1), 0);
+        cv::GaussianBlur(suitTemplate, suitTemplate, Size(1,3), 0);
+
+        // Find edges and increase edge thickness.
+        auto contours = findSortedContours(suitTemplate, 10, 80);
+        suitHistograms[i] = tangentHistogram(contours[0]);
+    }
+
+    rankTempl.resize(13);
+    for (int i = 0; i < 13; i++)
+    {
+        Mat templ = imread("cards/rank/" + to_string(i) + ".png");
+        
+
+        auto contours = findSortedContours(templ, 10, 80);
+        auto rect = boundingRect(contours[0]);
+
+        templ = templ(rect).clone();
+
+        cvtColor(templ, templ, COLOR_BGR2GRAY);
+        resize(templ, templ, Size(RANK_WIDTH, RANK_HEIGHT));
+
+        rankTempl[i] = templ;
+
+        // cv::imshow("edge", edges);
+        // cv::imshow("tempp", templ);
+        // waitKey(0);
+        // destroyAllWindows();
+    }
 }
 
 COLOR identifyColor(Mat& imgCorner)
@@ -212,6 +223,7 @@ SUIT identifySuit(Mat& imgCorner, COLOR suitColor)
     double bestScore = -1e9; 
     double score = bestScore;
     
+    std::cout << "\n";
     for (; curSuit <= endSuit; curSuit++)
     {
         score = -1e9;
@@ -241,6 +253,41 @@ SUIT identifySuit(Mat& imgCorner, COLOR suitColor)
 
 RANK identifyRank(Mat& imgCorner)
 {
+    Mat edges, map;
+    auto contours = findSortedContours(imgCorner, 10, 80);
+    auto rect = boundingRect(contours[0]);
+    imgCorner = imgCorner(rect).clone();
+    resize(imgCorner, imgCorner, Size(RANK_WIDTH, RANK_HEIGHT));
+    cvtColor(imgCorner, imgCorner, COLOR_BGR2GRAY);
+    
+    int bestRank = 0;
+    double bestScore = DBL_MAX;
+    double score = DBL_MAX;
+
+    for (int i = 0; i < 13; i++)
+    {
+        Mat diff;
+        absdiff(imgCorner, rankTempl[i], diff);
+        threshold(diff, diff, 100, 255, THRESH_BINARY);
+        score = (double)countNonZero(diff);
+
+        if (score < bestScore)
+        {
+            bestScore = score;
+            bestRank = i;
+        }
+
+        std::cout << numToRank(i) << " Templ Score: " << score << "\n";
+        // cv::imshow("matches", diff);
+        // waitKey(0);
+        // destroyWindow("matches");
+    }
+    return static_cast<RANK>(bestRank);
+}
+
+/*
+RANK identifyRank(Mat& imgCorner)
+{
     Mat grey;
     cvtColor(imgCorner, grey, COLOR_BGR2GRAY);
     threshold(grey, grey, 0, 255, THRESH_BINARY | THRESH_OTSU);
@@ -248,24 +295,23 @@ RANK identifyRank(Mat& imgCorner)
 
     std::vector<cv::KeyPoint> rankKP;
     cv::Mat rankDesc;
-    orb->detectAndCompute(grey, cv::noArray(), rankKP, rankDesc);
+    sift->detectAndCompute(grey, cv::noArray(), rankKP, rankDesc);  // ← was orb->
 
     if (rankDesc.empty()) return RANK::ACE;
 
-    cv::BFMatcher matcher(cv::NORM_HAMMING);
+    cv::BFMatcher matcher(cv::NORM_L2);  // ← was NORM_HAMMING; SIFT uses float descriptors
     int bestRank = 0;
     double bestScore = -1;
 
     for (int i = 0; i < 13; i++)
     {
-        
         std::vector<std::vector<cv::DMatch>> knnMatches;
         matcher.knnMatch(rankDesc, rankDescriptors[i], knnMatches, 2);
 
         std::vector<cv::DMatch> goodMatches;
         for (const auto& m : knnMatches)
         {
-            if (m.size() >= 2 && m[0].distance < .80f * m[1].distance)
+            if (m.size() >= 2 && m[0].distance < .6f * m[1].distance)
                 goodMatches.push_back(m[0]);
         }
 
@@ -291,10 +337,11 @@ RANK identifyRank(Mat& imgCorner)
 
     return static_cast<RANK>(bestRank);
 }
+*/
 
 
 CARD identifyCard(Mat& imgCorner, Mat& imgCard)
-{  
+{   
     // Find card, 
     CARD cardType;
 
@@ -303,9 +350,6 @@ CARD identifyCard(Mat& imgCorner, Mat& imgCard)
 
     //Find rank and suit
     Mat rankCorner = imgCorner(cv::Rect(0, 0, cornerWidth, 130)).clone();
-    imshow("rank", rankCorner);
-    waitKey(0);
-    destroyWindow("rank");
 
     cardType.first = identifyRank(rankCorner);
     cardType.second = identifySuit(imgCorner, suitColor);

@@ -107,7 +107,7 @@ void testLocal()
 int main()
 {
     initTemplates();
-    testLocal();
+    testCam();
 
     return 0;
 }
